@@ -1,0 +1,55 @@
+services:
+  kafka:
+    image: confluentinc/cp-kafka:7.4.12
+    hostname: kafka
+    ports:
+      # - "9092"
+      # - "9101"
+      # - "9093"
+      - "9092:9092" # Use for local tests
+      - "9101:9101"
+      - "9093:9093"
+    configs:
+      - source: kafka_jaas
+        target: /etc/kafka/jaas.conf
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: "CONTROLLER:PLAINTEXT,INTERNAL:PLAINTEXT,EXTERNAL:PLAINTEXT,EXTERNAL2:SASL_PLAINTEXT"
+      KAFKA_ADVERTISED_LISTENERS: "INTERNAL://kafka:29092,EXTERNAL://localhost:9092,EXTERNAL2://localhost:9093"
+      KAFKA_OPTS: "-Djava.security.auth.login.config=/etc/kafka/jaas.conf"
+      KAFKA_SASL_ENABLED_MECHANISMS: PLAIN
+      KAFKA_SASL_MECHANISM_INTER_BROKER_PROTOCOL: PLAIN
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_JMX_PORT: 9101
+      KAFKA_JMX_HOSTNAME: localhost
+      KAFKA_PROCESS_ROLES: "broker,controller"
+      KAFKA_CONTROLLER_QUORUM_VOTERS: "1@kafka:29093"
+      KAFKA_LISTENERS: "INTERNAL://kafka:29092,CONTROLLER://kafka:29093,EXTERNAL://0.0.0.0:9092,EXTERNAL2://0.0.0.0:9093"
+      KAFKA_INTER_BROKER_LISTENER_NAME: "INTERNAL"
+      KAFKA_CONTROLLER_LISTENER_NAMES: "CONTROLLER"
+      KAFKA_LOG_DIRS: "/tmp/kraft-combined-logs"
+      # Replace CLUSTER_ID with a unique base64 UUID using "bin/kafka-storage.sh random-uuid"
+      # See https://docs.confluent.io/kafka/operations-tools/kafka-tools.html#kafka-storage-sh
+      CLUSTER_ID: "QJMeT5jlT_2DOJjKtK_B0Q"
+  kafka-setup:
+    image: confluentinc/cp-kafka:7.4.12
+    depends_on:
+      - kafka
+    # cub kafka-ready -b [bootstrap_broker_list] [expected_brokers num] [timeout in secs to wait]
+    command: "bash -c 'echo Waiting for Kafka to be ready... && \
+      cub kafka-ready -b kafka:29092 1 60 &&
+      kafka-topics \
+      --create \
+      --if-not-exists \
+      --bootstrap-server kafka:29092 \
+      --partitions 1 \
+      --replication-factor 1 \
+      --topic test-topic'"
+
+configs:
+  kafka_jaas:
+    file: ./kafka/jaas.conf

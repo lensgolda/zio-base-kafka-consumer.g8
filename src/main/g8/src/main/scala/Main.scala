@@ -3,7 +3,7 @@ import zio.kafka.consumer._
 import zio.kafka.serde.*
 import zio.config.typesafe.*
 import zio.logging.backend.SLF4J
-import _root_.config.AppConfig
+import _root_.config.Configuration.AppConfig
 
 object BasicConsumer extends ZIOAppDefault {
 
@@ -12,24 +12,21 @@ object BasicConsumer extends ZIOAppDefault {
             >>> Runtime.removeDefaultLoggers
             >>> SLF4J.slf4j
 
-    val consumerSettings: ZLayer[AppConfig, Nothing, ConsumerSettings] =
-        ZLayer(
-          for
-              config <- ZIO.service[AppConfig]
-              baseSettings =
-                  ConsumerSettings(config.kafka.bootstrapServers)
-                      .withGroupId(config.kafka.groupId)
-                      .withProperty("auto.offset.reset", "earliest")
-                      .withClientId(config.kafka.clientId)
-              saslSettings = Map(
-                "sasl.mechanism" -> config.kafka.sasl.mechanism,
-                // "sasl.jaas.config" -> s"""org.apache.kafka.common.security.plain.PlainLoginModule required username="\${config.kafka.sasl.username}" password="\${config.kafka.sasl.password}";""",
-                "sasl.jaas.config" -> s"""org.apache.kafka.common.security.scram.ScramLoginModule required username="\${config.kafka.sasl.username}" password="\${config.kafka.sasl.password}";""",
-                "security.protocol" -> config.kafka.sasl.securityProtocol,
-                "enable.auto.commit" -> "false"
-                // "log_level" -> "DEBUG"
-              )
-          yield baseSettings.withProperties(saslSettings)
+    val consumerSettingsZIO: ZIO[AppConfig, Throwable, ConsumerSettings] =
+        ZIO.serviceWith[AppConfig](config =>
+            val saslSettings = Map(
+              "sasl.mechanism" -> config.kafka.sasl.mechanism,
+              // "sasl.jaas.config" -> s"""org.apache.kafka.common.security.plain.PlainLoginModule required username="\${config.kafka.sasl.username}" password="\${config.kafka.sasl.password}";""",
+              "sasl.jaas.config" -> s"""org.apache.kafka.common.security.scram.ScramLoginModule required username="\${config.kafka.sasl.username}" password="\${config.kafka.sasl.password}";""",
+              "security.protocol" -> config.kafka.sasl.securityProtocol,
+              "enable.auto.commit" -> "false"
+              // "log_level" -> "DEBUG"
+            )
+            ConsumerSettings(config.kafka.bootstrapServers)
+                .withGroupId(config.kafka.groupId)
+                .withProperty("auto.offset.reset", "earliest")
+                .withClientId(config.kafka.clientId)
+                .withProperties(saslSettings)
         )
 
     val subscriptionService: ZIO[AppConfig, Nothing, Subscription] =
@@ -46,14 +43,6 @@ object BasicConsumer extends ZIOAppDefault {
         _ <- consumer
             .plainStream(subscription, Serde.string, Serde.string)
             .take(3)
-            // .tap(record =>
-            //     ZIO.logInfo(s"Received: \${record.key} -> \${record.value}")
-            // )
-            // .mapZIO { record =>
-            //     ZIO.logInfo(s"Received: \${record.key} -> \${record.value}")
-            //         *> record.offset.commit
-            // }
-            // .runDrain
             .runForeach(record =>
                 ZIO.logInfo(s"Received: \${record.key} -> \${record.value}")
                 // *> record.offset.commit
@@ -67,9 +56,8 @@ object BasicConsumer extends ZIOAppDefault {
     val run: ZIO[Any, Nothing, Unit] =
         runConsumer
             .onInterrupt(
-              ZIO.logError(">>> Interrupted") *> ZIO.die(
-                new Exception(">>> Die <<<")
-              )
+              ZIO.logError(">>> Interrupted")
+                  *> ZIO.die(new Exception("Interrupted"))
             )
             .retry(Schedule.fixed(5.seconds) && Schedule.recurs(2))
             .provide(
